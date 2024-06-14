@@ -218,13 +218,16 @@ def get_markdown_res(tokenizer, tokens, raw_width, raw_height):
 	def md_post_process(md):
 		md = md.replace('<br>', '\n')
 		lines = md.split('\n')
+		text_lines = ""
 		new_lines = []
 		for i in range(len(lines)):
 			text = lines[i].strip()
 			new_lines.append(text)
+			text_lines += text + " "
 		md = '\n'.join(new_lines)
 		md = re.sub('\n{2,}', '\n\n', md).strip()
 
+		print(text_lines)
 		return md
 
 	def get_json_format(md, raw_width, raw_height):
@@ -238,6 +241,7 @@ def get_markdown_res(tokenizer, tokens, raw_width, raw_height):
 		return json_res
 
 	tokens = md_pre_process(tokens)
+	print(tokens)
 	tokens = tokens[tokens.index('</image>') + 2:tokens.index('</s>')]
 	md = tokenizer.decode([int(t) for t in tokens])
 	md = md_post_process(md)
@@ -253,6 +257,7 @@ def get_ocr_res(tokenizer, tokens, p2s_resized_width, p2s_resized_height, raw_wi
 			return min(max(num, min_num), max_num)
 
 		new_lines = []
+		text_lines = ""
 		for i in range(len(lines)):
 			text, [x0, y0, x1, y1], _ = lines[i]
 			text = text.strip()
@@ -263,7 +268,9 @@ def get_ocr_res(tokenizer, tokens, p2s_resized_width, p2s_resized_height, raw_wi
 			x1 = clip(0, int(clip(0, x1 / p2s_resized_width, 1) * raw_width), raw_width)
 			y1 = clip(0, int(clip(0, y1 / p2s_resized_height, 1) * raw_height), raw_height)
 
+			text_lines += text + " "
 			new_lines.append([text, [x0, y0, x1, y1]])
+		print(text_lines)
 		return new_lines
 
 
@@ -374,7 +381,7 @@ def main():
 		else:
 			result = get_markdown_res(tokenizer, tokens, raw_width, raw_height)
 
-		print(f'\n{result}')
+		#print(f'\n{result}')
 		json.dump(result, open(save_path, 'w', encoding='utf-8'), indent=4)
 
 		print('done')
