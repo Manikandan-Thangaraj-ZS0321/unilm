@@ -1,3 +1,5 @@
+import gc
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import torch
@@ -6,8 +8,10 @@ import ast
 import tiktoken
 import re
 import numpy as np
+import argparse
+
 from PIL import Image
-from typing import List
+from typing import List, Optional
 
 from transformers import AutoProcessor
 from omegaconf import OmegaConf
@@ -22,14 +26,9 @@ class ParseList(BaseModel):
 
 
 class RequestBody(BaseModel):
-    image: str
-    out_dir: str = "./"
+    image: Optional[str] = None
     do_ocr: bool = False
     do_md: bool = False
-    ckpt: str
-    use_preprocess: bool = False
-    hw_ratio_adj_upper_span: List[float] = [1.5, 5]
-    hw_ratio_adj_lower_span: List[float] = [0.5, 1.0]
 
 
 def init(args):
@@ -93,7 +92,7 @@ def init(args):
             'dict_path': './dict.txt'
         }
     }
-    cfg['common_eval']['path'] = args.ckpt
+    cfg['common_eval']['path'] = "ckpt.pt"
     cfg = OmegaConf.create(cfg)
 
     utils.import_user_module(cfg.common)
@@ -135,6 +134,11 @@ def init(args):
 
 
 def build_data(args, image_path, image_processor, dictionary):
+
+    # args.use_preprocess = False,
+    # args.hw_ratio_adj_upper_span = [1.5, 5],
+    # args.hw_ratio_adj_lower_span = [0.5, 1.0]
+
     bos_id = dictionary.bos()
     eos_id = dictionary.eos()
     boi_id = dictionary.index("<image>")
@@ -150,15 +154,15 @@ def build_data(args, image_path, image_processor, dictionary):
     image = Image.open(image_path).convert("RGB")
 
     raw_width, raw_height = image.width, image.height
-    if args.use_preprocess:
-        ratio = raw_height / raw_width
-
-        if args.hw_ratio_adj_upper_span[1] > ratio > args.hw_ratio_adj_upper_span[0]:
-            new_width = int(raw_height / args.hw_ratio_adj_upper_span[0])
-            image = image.resize((new_width, raw_height))
-        elif args.hw_ratio_adj_lower_span[1] > ratio > args.hw_ratio_adj_lower_span[0]:
-            new_height = (int(raw_width * args.hw_ratio_adj_lower_span[1]))
-            image = image.resize((raw_width, new_height))
+    # if args.use_preprocess:
+    #     ratio = raw_height / raw_width
+    #
+    #     if args.hw_ratio_adj_upper_span[1] > ratio > args.hw_ratio_adj_upper_span[0]:
+    #         new_width = int(raw_height / args.hw_ratio_adj_upper_span[0])
+    #         image = image.resize((new_width, raw_height))
+    #     elif args.hw_ratio_adj_lower_span[1] > ratio > args.hw_ratio_adj_lower_span[0]:
+    #         new_height = (int(raw_width * args.hw_ratio_adj_lower_span[1]))
+    #         image = image.resize((raw_width, new_height))
 
     img_res = image_processor(images=image, return_tensors="pt", max_patches=4096)
     width = img_res['width'][0]
@@ -207,6 +211,9 @@ def get_markdown_res(tokenizer, tokens, raw_width, raw_height):
         print(text_lines)
         return md
 
+    def get_markdown_only_data(md):
+        return md
+
     def get_json_format(md, raw_width, raw_height):
         json_res = {
             'model': "kosmos 2.5",
@@ -218,12 +225,15 @@ def get_markdown_res(tokenizer, tokens, raw_width, raw_height):
         return json_res
 
     tokens = md_pre_process(tokens)
-    print(tokens)
     tokens = tokens[tokens.index('</image>') + 2:tokens.index('</s>')]
     md = tokenizer.decode([int(t) for t in tokens])
-    md = md_post_process(md)
-    json_data = get_json_format(md, raw_width, raw_height)
-    return json_data
+
+    # md = md_post_process(md)
+    # json_data = get_json_format(md, raw_width, raw_height)
+    # return json_data
+
+    md = get_markdown_only_data(md)
+    return md
 
 
 def get_ocr_res(tokenizer, tokens, p2s_resized_width, p2s_resized_height, raw_width, raw_height):
@@ -248,8 +258,17 @@ def get_ocr_res(tokenizer, tokens, p2s_resized_width, p2s_resized_height, raw_wi
 
             text_lines += text + " "
             new_lines.append([text, [x0, y0, x1, y1]])
-        print(text_lines)
         return new_lines
+
+    def get_ocr_only_content(lines):
+
+        text_lines = ""
+        for i in range(len(lines)):
+            text, [x0, y0, x1, y1], _ = lines[i]
+            text = text.strip()
+            if len(text) == 0: continue
+            text_lines += text + " "
+        return text_lines
 
     def get_json_format(lines, raw_width, raw_height):
         json_res = {
@@ -305,61 +324,100 @@ def get_ocr_res(tokenizer, tokens, p2s_resized_width, p2s_resized_height, raw_wi
             continue
         cur_token.append(cur_line)
         lines.append([tokenizer.decode(cur_line).strip(), [x0, y0, x1, y1], cur_bbox])
-    lines = ocr_post_process(lines, p2s_resized_width, p2s_resized_height, raw_width, raw_height)
 
-    json_data = get_json_format(lines, raw_width, raw_height)
+    #For converting to custom json data
+    #lines = ocr_post_process(lines, p2s_resized_width, p2s_resized_height, raw_width, raw_height)
+    #json_data = get_json_format(lines, raw_width, raw_height)
+    #return json_data
 
-    return json_data
+    get_ocr_only_result = get_ocr_only_content(lines)
+    return get_ocr_only_result
+
+
+def parse_list(arg):
+    try:
+        parsed_list = ast.literal_eval(arg)
+        if isinstance(parsed_list, list):
+            return parsed_list
+        else:
+            raise ValueError
+    except (ValueError, SyntaxError):
+        raise argparse.ArgumentTypeError("Argument must be a list formatted as '[value1, value2, ...]'")
+
+
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--image", "-i", type=str, default=None, help="Input image")
+    parser.add_argument("--out_dir", "-o", type=str, default="./", help="Output directory.")
+    parser.add_argument("--do_ocr", action='store_true', default=False)
+    parser.add_argument("--do_md", action='store_true', default=False)
+    parser.add_argument("--ckpt", "-c", type=str, default="ckpt.pt")
+    parser.add_argument("--use_preprocess", action='store_true', default=False, help="")
+    parser.add_argument("--hw_ratio_adj_upper_span", type=parse_list, default=[1.5, 5])
+    parser.add_argument("--hw_ratio_adj_lower_span", type=parse_list, default=[0.5, 1.0])
+
+    args = parser.parse_args()
+    return args
+
+
+#args = get_args()
+# Global model initialization
+args = RequestBody(
+    do_ocr=True,
+    do_md=False,
+)
+
+
+task, models, generator, image_processor, dictionary, tokenizer = init(args)
 
 
 @app.post("/process_image")
 async def process_image(args: RequestBody):
-    if not os.path.exists(args.image):
-        raise HTTPException(status_code=400, detail="Image does not exist.")
+    try:
 
-    if not os.path.exists(args.out_dir):
-        os.makedirs(args.out_dir)
+        if not os.path.exists(args.image):
+            raise HTTPException(status_code=400, detail="Image does not exist.")
 
-    if not os.path.exists(args.ckpt):
-        raise HTTPException(status_code=400, detail="Ckpt does not exist.")
 
-    if not ((args.do_ocr and not args.do_md) or (args.do_md and not args.do_ocr)):
-        raise HTTPException(status_code=400,
-                            detail="A task must be selected, with the options being either '--do_ocr' or '--do_md'.")
+        if not ((args.do_ocr and not args.do_md) or (args.do_md and not args.do_ocr)):
+            raise HTTPException(status_code=400,
+                                detail="A task must be selected, with the options being either '--do_ocr' or '--do_md'.")
 
-    task, models, generator, image_processor, dictionary, tokenizer = init(args)
+        src_tokens, src_lengths, img_src_token, img_attn_mask, img_gpt_input_mask, segment_token, p2s_resized_width, p2s_resized_height, raw_width, raw_height = build_data(
+            args, args.image, image_processor, dictionary)
 
-    src_tokens, src_lengths, img_src_token, img_attn_mask, img_gpt_input_mask, segment_token, p2s_resized_width, p2s_resized_height, raw_width, raw_height = build_data(
-        args, args.image, image_processor, dictionary)
+        src_tokens = src_tokens.cuda()
+        src_lengths = src_lengths.cuda().half()
+        img_src_token = img_src_token.cuda().half()
+        img_attn_mask = img_attn_mask.cuda().half()
+        img_gpt_input_mask = img_gpt_input_mask.cuda().half()
+        segment_token = segment_token.cuda()
 
-    src_tokens = src_tokens.cuda()
-    src_lengths = src_lengths.cuda().half()
-    img_src_token = img_src_token.cuda().half()
-    img_attn_mask = img_attn_mask.cuda().half()
-    img_gpt_input_mask = img_gpt_input_mask.cuda().half()
-    segment_token = segment_token.cuda()
+        sample = {
+            "net_input": {
+                "src_tokens": src_tokens,
+                "src_lengths": src_lengths,
+                "image": img_src_token,
+                "image_attention_masks": img_attn_mask,
+                "segment_tokens": segment_token,
+                "img_gpt_input_mask": img_gpt_input_mask,
+            },
+        }
 
-    sample = {
-        "net_input": {
-            "src_tokens": src_tokens,
-            "src_lengths": src_lengths,
-            "image": img_src_token,
-            "image_attention_masks": img_attn_mask,
-            "segment_tokens": segment_token,
-            "img_gpt_input_mask": img_gpt_input_mask,
-        },
-    }
+        translations = task.inference_step(generator, models, sample, constraints=None)
 
-    translations = task.inference_step(generator, models, sample, constraints=None)
+        tokens = []
+        for tid in translations[0][0]["tokens"].int().cpu().tolist():
+            cur_id = dictionary[tid]
+            tokens.append(cur_id)
 
-    tokens = []
-    for tid in translations[0][0]["tokens"].int().cpu().tolist():
-        cur_id = dictionary[tid]
-        tokens.append(cur_id)
+        if args.do_ocr:
+            result = get_ocr_res(tokenizer, tokens, p2s_resized_width, p2s_resized_height, raw_width, raw_height)
+        else:
+            result = get_markdown_res(tokenizer, tokens, raw_width, raw_height)
 
-    if args.do_ocr:
-        result = get_ocr_res(tokenizer, tokens, p2s_resized_width, p2s_resized_height, raw_width, raw_height)
-    else:
-        result = get_markdown_res(tokenizer, tokens)
+        return result
 
-    return {"result": result}
+    finally:
+        gc.collect()
+        torch.cuda.empty_cache()
