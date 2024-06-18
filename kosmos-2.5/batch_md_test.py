@@ -6,7 +6,7 @@ import time
 api_url = 'http://192.168.10.238:10006/process_image'
 
 # Define folder path containing images
-folder_path = '/home/hera/workspace/unilm/kosmos-2.5/test1'
+folder_path = '/home/hera/workspace/unilm/kosmos-2.5/kosmos_test'
 
 # Define headers
 headers = {
