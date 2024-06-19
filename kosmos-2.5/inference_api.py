@@ -1,4 +1,5 @@
 import gc
+import logging
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -321,8 +322,8 @@ def get_ocr_res(tokenizer, tokens, p2s_resized_width, p2s_resized_height, raw_wi
             x1 = int(cur_bbox[2][1:-1].split('_')[-1])
             y1 = int(cur_bbox[3][1:-1].split('_')[-1])
             pass
-        except:
-            print('w')
+        except Exception as ex:
+            print(f"Exception occurred while processing with exception: {ex}")
             continue
         cur_token.append(cur_line)
         lines.append([tokenizer.decode(cur_line).strip(), [x0, y0, x1, y1], cur_bbox])
