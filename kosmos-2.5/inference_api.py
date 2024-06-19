@@ -212,6 +212,8 @@ def get_markdown_res(tokenizer, tokens, raw_width, raw_height):
         return md
 
     def get_markdown_only_data(md):
+        md = md.replace('\n', '')
+        md = md.replace('<br>', '')
         return md
 
     def get_json_format(md, raw_width, raw_height):
