@@ -39,7 +39,7 @@ for filename in os.listdir(folder_path):
 
             # Write response JSON to HTML file
             with open(output_file_path, 'w') as file:
-                file.write(f'<html><body><pre>{response.text}</pre></body></html>')
+                file.write(f'<!DOCTYPE html><html><body><pre>{response.text}</pre></body></html>')
 
             print(f"Processed {file_path}. Response saved to {output_file_path}")
         else:
