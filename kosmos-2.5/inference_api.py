@@ -200,16 +200,13 @@ def get_markdown_res(tokenizer, tokens, raw_width, raw_height):
     def md_post_process(md):
         md = md.replace('<br>', '\n')
         lines = md.split('\n')
-        text_lines = ""
         new_lines = []
         for i in range(len(lines)):
             text = lines[i].strip()
             new_lines.append(text)
-            text_lines += text + " "
         md = '\n'.join(new_lines)
         md = re.sub('\n{2,}', '\n\n', md).strip()
 
-        print(text_lines)
         return md
 
     def get_markdown_only_data(md):
